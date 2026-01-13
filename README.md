@@ -26,28 +26,7 @@ The project is intentionally designed as a **reusable primitive**, not a one-off
 
 ## Architecture (High-Level)
 
-```
-+---------------------+
-| On-chain Program |
-| (Solana / Future) |
-+----------+----------+
-|
-| randomness request
-|
-+----------v----------+
-| ws_rand_service |
-| (Rust backend) |
-| - Secure compute |
-| - Random derivation |
-+----------+----------+
-|
-| verifiable output
-|
-+----------v----------+
-| On-chain Consumer |
-| (Game / DeFi / DAO) |
-+---------------------+
-```
+![Privacy Preserving Randomness Architecture](./assets/privacy_preserving_randomness.png)
 
 The service is designed so that:
 - Randomness **cannot be influenced** by a single actor
