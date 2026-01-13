@@ -1,121 +1,136 @@
-# Structure of this project
+# ws_rand_service
 
-This project is structured pretty similarly to how a regular Solana Anchor project is structured. The main difference lies in there being two places to write code here:
+A verifiable, privacy-preserving randomness service for on-chain applications, built with Rust and confidential compute.
 
-- The `programs` dir like usual Anchor programs
-- The `encrypted-ixs` dir for confidential computing instructions
+---
 
-When working with plaintext data, we can edit it inside our program as normal. When working with confidential data though, state transitions take place off-chain using the Arcium network as a co-processor. For this, we then always need two instructions in our program: one that gets called to initialize a confidential computation, and one that gets called when the computation is done and supplies the resulting data. Additionally, since the types and operations in a Solana program and in a confidential computing environment are a bit different, we define the operations themselves in the `encrypted-ixs` dir using our Rust-based framework called Arcis. To link all of this together, we provide a few macros that take care of ensuring the correct accounts and data are passed for the specific initialization and callback functions:
+## Overview
 
-```rust
-// encrypted-ixs/add_together.rs
+`ws_rand_service` is a general-purpose **randomness infrastructure service** designed for blockchain applications that require **fair, unbiased, and verifiable random values**.
 
-use arcis_imports::*;
+Unlike naive on-chain randomness approaches (e.g. blockhash-based randomness), this service is built with a strong security model in mind and is suitable for **games, lotteries, DeFi protocols, governance mechanisms, and NFT applications**.
 
-#[encrypted]
-mod circuits {
-    use arcis_imports::*;
+The project is intentionally designed as a **reusable primitive**, not a one-off demo.
 
-    pub struct InputValues {
-        v1: u8,
-        v2: u8,
-    }
+---
 
-    #[instruction]
-    pub fn add_together(input_ctxt: Enc<Shared, InputValues>) -> Enc<Shared, u16> {
-        let input = input_ctxt.to_arcis();
-        let sum = input.v1 as u16 + input.v2 as u16;
-        input_ctxt.owner.from_arcis(sum)
-    }
-}
+## Key Goals
 
-// programs/my_program/src/lib.rs
+- ✅ Fair and unbiased randomness generation  
+- ✅ Verifiable outputs consumable by smart contracts  
+- ✅ Privacy-preserving computation (no plaintext leakage)  
+- ✅ Clean separation between randomness generation and consumption  
+- ✅ Extensible architecture for future protocols
 
-use anchor_lang::prelude::*;
-use arcium_anchor::prelude::*;
+---
 
-declare_id!("<some ID>");
+## Architecture (High-Level)
 
-#[arcium_program]
-pub mod my_program {
-    use super::*;
-
-    pub fn init_add_together_comp_def(ctx: Context<InitAddTogetherCompDef>) -> Result<()> {
-        init_comp_def(ctx.accounts, None, None)?;
-        Ok(())
-    }
-
-    pub fn add_together(
-        ctx: Context<AddTogether>,
-        computation_offset: u64,
-        ciphertext_0: [u8; 32],
-        ciphertext_1: [u8; 32],
-        pubkey: [u8; 32],
-        nonce: u128,
-    ) -> Result<()> {
-        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
-        let args = ArgBuilder::new()
-            .x25519_pubkey(pubkey)
-            .plaintext_u128(nonce)
-            .encrypted_u8(ciphertext_0)
-            .encrypted_u8(ciphertext_1)
-            .build();
-
-        queue_computation(
-            ctx.accounts,
-            computation_offset,
-            args,
-            None,
-            vec![AddTogetherCallback::callback_ix(
-                computation_offset,
-                &ctx.accounts.mxe_account,
-                &[]
-            )?],
-            1,
-            0,
-        )?;
-        Ok(())
-    }
-
-    #[arcium_callback(encrypted_ix = "add_together")]
-    pub fn add_together_callback(
-        ctx: Context<AddTogetherCallback>,
-        output: SignedComputationOutputs<AddTogetherOutput>,
-    ) -> Result<()> {
-        let o = match output.verify_output(&ctx.accounts.cluster_account, &ctx.accounts.computation_account) {
-            Ok(AddTogetherOutput { field_0 }) => field_0,
-            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
-        };
-
-        emit!(SumEvent {
-            sum: o.ciphertexts[0],
-            nonce: o.nonce.to_le_bytes(),
-        });
-        Ok(())
-    }
-}
-
-#[queue_computation_accounts("add_together", payer)]
-#[derive(Accounts)]
-#[instruction(computation_offset: u64)]
-pub struct AddTogether<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    // ... other required accounts
-}
-
-#[callback_accounts("add_together")]
-#[derive(Accounts)]
-pub struct AddTogetherCallback<'info> {
-    // ... required accounts
-    pub some_extra_acc: AccountInfo<'info>,
-}
-
-#[init_computation_definition_accounts("add_together", payer)]
-#[derive(Accounts)]
-pub struct InitAddTogetherCompDef<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    // ... other required accounts
-}
 ```
++---------------------+
+| On-chain Program |
+| (Solana / Future) |
++----------+----------+
+|
+| randomness request
+|
++----------v----------+
+| ws_rand_service |
+| (Rust backend) |
+| - Secure compute |
+| - Random derivation |
++----------+----------+
+|
+| verifiable output
+|
++----------v----------+
+| On-chain Consumer |
+| (Game / DeFi / DAO) |
++---------------------+
+```
+
+The service is designed so that:
+- Randomness **cannot be influenced** by a single actor
+- Outputs can be **verified on-chain**
+- Internal computation logic can remain **confidential**
+
+---
+
+## Use Cases
+
+- 🎮 On-chain games and loot systems  
+- 🎟️ Lotteries and raffles  
+- 🖼️ NFT trait generation  
+- 🗳️ DAO governance (random selection, ordering)  
+- 📉 DeFi mechanisms requiring unbiased randomness  
+
+---
+
+## Design Principles
+
+- **Security-first**: No reliance on predictable or manipulable on-chain entropy
+- **Minimal trust assumptions**: No single oracle or operator controls outcomes
+- **Composable**: Easy to integrate with different programs and workflows
+- **Protocol-agnostic**: Not tied to a single application or contract
+
+---
+
+## Project Structure (WIP)
+
+```
+ws_rand_service/
+├── src/
+│ ├── core/ # Core randomness logic
+│ ├── service/ # Request / response handling
+│ ├── types/ # Shared data structures
+│ └── lib.rs
+├── examples/ # Example integrations
+├── tests/
+└── README.md
+```
+
+---
+
+## Current Status
+
+⚠️ **Early development / experimental**
+
+This repository is under active development.  
+APIs, interfaces, and internal design may change as the project evolves.
+
+---
+
+## Roadmap
+
+- [ ] Core randomness computation module
+- [ ] Verifiable output format
+- [ ] Solana example consumer program
+- [ ] Security review and threat model
+- [ ] Documentation and usage examples
+
+---
+
+## Security Notes
+
+This project aims to avoid common randomness pitfalls such as:
+- Block producer manipulation
+- Predictable entropy sources
+- Single-operator control
+
+That said, **this code has not yet been audited**.  
+Do not use in production environments without proper review.
+
+---
+
+## License
+
+MIT License
+
+---
+
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind.  
+Use at your own risk.
+
+---
